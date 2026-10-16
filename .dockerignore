@@ -1,0 +1,8 @@
+.git/
+build/
+build-*/
+dist/
+inputs/
+runs/
+.venv/
+__pycache__/

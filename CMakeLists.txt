@@ -16,9 +16,10 @@ add_compile_options(-Wall -Wextra)
 
 # --- dependencies ------------------------------------------------------------
 # Expect system-installed protobuf + gRPC (e.g. Debian/Ubuntu:
-#   apt install -y libgrpc++-dev libprotobuf-dev protobuf-compiler protobuf-compiler-grpc)
+#   apt install -y libgrpc++-dev libprotobuf-dev libssl-dev protobuf-compiler protobuf-compiler-grpc)
 find_package(Protobuf REQUIRED)
 find_package(Threads REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 find_program(PROTOC_EXECUTABLE protoc REQUIRED)
 find_program(GRPC_CPP_PLUGIN grpc_cpp_plugin REQUIRED)
@@ -68,23 +69,27 @@ foreach(proto ${PROTO_FILES})
 endforeach()
 
 # --- binary ------------------------------------------------------------------
-add_executable(gobgp_client_benchmark
-    main.cpp
-    ${GENERATED_SOURCES}
-)
+add_library(benchmark_proto STATIC ${GENERATED_SOURCES})
 
-target_include_directories(gobgp_client_benchmark PRIVATE
+target_include_directories(benchmark_proto PUBLIC
     "${PROTO_OUT_DIR}"
     ${GRPC_INCLUDE_DIRS}
     ${Protobuf_INCLUDE_DIRS}
 )
 
-target_link_directories(gobgp_client_benchmark PRIVATE
+target_link_directories(benchmark_proto PUBLIC
     ${GRPC_LIBRARY_DIRS}
 )
 
-target_link_libraries(gobgp_client_benchmark PRIVATE
+target_link_libraries(benchmark_proto PUBLIC
     ${GRPC_LIBRARIES}
     ${Protobuf_LIBRARIES}
     Threads::Threads
 )
+
+add_executable(gobgp_client_benchmark main.cpp)
+target_link_libraries(gobgp_client_benchmark PRIVATE benchmark_proto)
+
+# Kept separate so correctness hashing never affects the timed client.
+add_executable(gobgp_table_validate validate.cpp)
+target_link_libraries(gobgp_table_validate PRIVATE benchmark_proto OpenSSL::Crypto)
