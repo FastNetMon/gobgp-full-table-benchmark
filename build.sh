@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 FastNetMon Ltd.
 #
-# Build gobgp_client_benchmark in an Ubuntu 24.04 container and extract the
-# binary to ./dist/gobgp_client_benchmark on the host. No host-side build
+# Build the timing and validation clients in an Ubuntu 24.04 container and
+# extract both binaries to ./dist on the host. No host-side build
 # toolchain required beyond docker.
 #
 # Runtime requirements on the target Ubuntu 24.04 machine (install before
@@ -31,9 +31,11 @@ mkdir -p "${OUT_DIR}"
 cid="$(docker create "${IMAGE}")"
 trap 'docker rm -f "${cid}" >/dev/null 2>&1 || true' EXIT
 docker cp "${cid}:/src/build/gobgp_client_benchmark" "${OUT_DIR}/gobgp_client_benchmark"
+docker cp "${cid}:/src/build/gobgp_table_validate" "${OUT_DIR}/gobgp_table_validate"
 
 echo
 echo "=> ${OUT_DIR}/gobgp_client_benchmark"
+echo "=> ${OUT_DIR}/gobgp_table_validate"
 ls -la "${OUT_DIR}/gobgp_client_benchmark"
 file "${OUT_DIR}/gobgp_client_benchmark" 2>/dev/null || true
 echo

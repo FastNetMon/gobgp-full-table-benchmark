@@ -1,0 +1,52 @@
+{
+  "runtime_image": "gobgp-client-benchmark:ubuntu-24.04",
+  "snapshot": {
+    "path": "../inputs/rib.20260808.0000.bz2",
+    "sha256": "03bf1ea39809789576786c61c7ff77d8e1977d04706af1457aaafaf7cb0e95fb"
+  },
+  "source": {
+    "daemon": "../inputs/gobgp-old-gobgpd",
+    "cli": "../inputs/gobgp-old-gobgp",
+    "revision": "a15f873029f807971b3bcf473c2e7a91550c96b2"
+  },
+  "variants": [
+    {
+      "name": "gobgp-old",
+      "label": "GoBGP 4.9.0",
+      "kind": "gobgp",
+      "binary": "../inputs/gobgp-old-gobgpd",
+      "revision": "a15f873029f807971b3bcf473c2e7a91550c96b2"
+    },
+    {
+      "name": "gobgp-new",
+      "label": "GoBGP 4.10.0",
+      "kind": "gobgp",
+      "binary": "../inputs/gobgp-new-gobgpd",
+      "revision": "e2cd8b1f900acea0f6bd558f84b75b624a324e0a"
+    },
+    {
+      "name": "rustybgp",
+      "label": "RustyBGP 603d350",
+      "kind": "rustybgp",
+      "binary": "../inputs/rustybgpd",
+      "revision": "603d350281a5aec03a068ddecfd5fc58f8fe66c5"
+    }
+  ],
+  "expected": {
+    "destinations": 1115966,
+    "paths": 1115966,
+    "nlri_bytes": 4448247,
+    "attribute_bytes": 56476851
+  },
+  "warmup_rounds": 1,
+  "measured_rounds": 5,
+  "seed": 20261016,
+  "settle_seconds": 12,
+  "idle_seconds": 15,
+  "sample_interval_seconds": 0.025,
+  "memory": true,
+  "subnet": "172.30.88.0/24",
+  "build_info": {
+    "note": "Record your actual compilers, build flags, Cargo.lock hash and source tree state here. Revision labels alone do not verify a binary's provenance."
+  }
+}

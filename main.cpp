@@ -5,8 +5,8 @@
 //
 // Minimal C++ gRPC client for benchmarking gobgpd's ListPath RPC against a
 // specific peer's ADJ_IN table. Measures ttfb, time blocked in Recv, time
-// processing between Recvs, and total wall time. Optionally decodes NLRI
-// and iterates attribute slices to include client-side decode cost.
+// processing between Recvs, and total wall time. Optionally scans binary
+// NLRI and attribute buffers; this is not a complete BGP decoder.
 //
 // Defaults mirror the "fully binary" path (enable_only_binary=true) so the
 // server skips its native→proto attribute type-switch. Flip --binary=false to
@@ -131,8 +131,8 @@ api::TableType table_enum(const std::string& s) {
 }
 
 // Minimal "touch" to force the kernel / protobuf layer to hand us the bytes —
-// stops the compiler from optimizing them away, and approximates what a real
-// decoder pays per path.
+// stops the compiler from optimizing them away. This does not parse BGP
+// fields or measure the cost of a complete decoder.
 volatile uint64_t sink = 0;
 inline void touch(const std::string& b) {
     const auto* p = reinterpret_cast<const uint8_t*>(b.data());
