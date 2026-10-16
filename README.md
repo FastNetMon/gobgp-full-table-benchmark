@@ -26,6 +26,8 @@ the cost of the proto-native encoding path for comparison.
 `--decode true` scans the binary buffers; it does not fully decode BGP NLRI
 or attributes. In structured mode there are no binary buffers to scan.
 
+**Latest results, explained:** https://fastnetmon.github.io/gobgp-full-table-benchmark/ (source in [`docs/`](docs/)).
+
 ## Reproducible comparisons and graphs
 
 See [METHODOLOGY.md](METHODOLOGY.md) for the measurement definitions, fixed-input
