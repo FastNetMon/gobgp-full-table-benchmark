@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Full-Table ListPath Benchmark</title>
+<meta name="description" content="How fast GoBGP and RustyBGP hand a full IPv4 BGP table (1.1M routes) to an API client over gRPC ListPath — latency, CPU and memory.">
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --ring: rgba(11,11,11,0.10);
+  --s1: #2a78d6;  /* GoBGP 4.9 */
+  --s2: #eb6834;  /* GoBGP 4.10 */
+  --s3: #1baf7a;  /* RustyBGP */
+  --before: #898781;
+  --good: #006300;
+  --code-bg: #f0efec;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --ring: rgba(255,255,255,0.10);
+    --s1: #3987e5;
+    --s2: #d95926;
+    --s3: #199e70;
+    --before: #6b6a64;
+    --good: #0ca30c;
+    --code-bg: #262624;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface: #1a1a19;
+  --ink: #f0efec;
+  --ink-2: #c3c2b7;
+  --muted: #898781;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --ring: rgba(255,255,255,0.10);
+  --s1: #3987e5;
+  --s2: #d95926;
+  --s3: #199e70;
+  --before: #6b6a64;
+  --good: #0ca30c;
+  --code-bg: #262624;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 860px; margin: 0 auto; padding: 40px 16px 64px; }
+h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+h2 { font-size: 1.3rem; margin: 48px 0 8px; }
+h3 { font-size: 1rem; margin: 0 0 4px; }
+p { margin: 0 0 12px; }
+.lede { color: var(--ink-2); font-size: 1.08rem; max-width: 64ch; }
+.meta { color: var(--muted); font-size: 0.85rem; margin-bottom: 28px; }
+a { color: var(--s1); }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+.card {
+  background: var(--surface);
+  border: 1px solid var(--ring);
+  border-radius: 12px;
+  padding: 20px;
+  margin: 16px 0;
+}
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 24px 0 8px; }
+.tile { background: var(--surface); border: 1px solid var(--ring); border-radius: 12px; padding: 16px; }
+.tile .v { font-size: 1.9rem; font-weight: 650; line-height: 1.1; }
+.tile .l { color: var(--ink-2); font-size: 0.88rem; margin-top: 6px; }
+.note { color: var(--ink-2); font-size: 0.9rem; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 0.88rem; color: var(--ink-2); margin: 4px 0 12px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart text { font-family: inherit; }
+.bar { transition: opacity .12s; }
+.chart:hover .bar { opacity: .55; }
+.chart .bar.hot { opacity: 1; }
+details { margin-top: 10px; font-size: 0.88rem; }
+summary { cursor: pointer; color: var(--ink-2); }
+table { border-collapse: collapse; width: 100%; margin-top: 8px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--grid); }
+th { color: var(--ink-2); font-weight: 600; }
+td.n, th.n { text-align: right; }
+.table-wrap { overflow-x: auto; }
+ul.take { padding-left: 20px; margin: 8px 0; }
+ul.take li { margin-bottom: 8px; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 640px) { .two { grid-template-columns: 1fr; } h1 { font-size: 1.6rem; } }
+#tip {
+  position: fixed; pointer-events: none; z-index: 10;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--ring); border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.15);
+  padding: 8px 10px; font-size: 0.82rem; line-height: 1.4;
+  opacity: 0; transition: opacity .1s; max-width: 260px;
+}
+#tip b { font-weight: 600; }
+.diagram text { font-family: inherit; }
+footer { margin-top: 56px; color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--grid); padding-top: 16px; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>How fast can a BGP daemon hand over a full Internet table?</h1>
+<p class="lede">We asked GoBGP and RustyBGP for the complete IPv4 table (1.1 million routes) through the gRPC <code>ListPath</code> API, the way a monitoring tool like FastNetMon does, and measured time, CPU and memory.</p>
+<p class="meta">Latest run: 16 October 2026 · RouteViews snapshot of 8 August 2026 · AMD Ryzen 7 9800X3D, 16 threads, 59 GiB RAM</p>
+
+<div class="tiles">
+  <div class="tile"><div class="v">2.1×</div><div class="l">RustyBGP returns the full table about twice as fast as GoBGP (1.7 s vs 3.6 s, fully binary mode)</div></div>
+  <div class="tile"><div class="v">5×</div><div class="l">quicker first response: 0.45 s vs 2.2–2.6 s before the first routes arrive</div></div>
+  <div class="tile"><div class="v">~5×</div><div class="l">less server CPU per dump (1.5 s vs 8.4 s in binary mode)</div></div>
+  <div class="tile"><div class="v">−64%</div><div class="l">RustyBGP peak memory after its bounded-stream fix (6.9 → 2.5 GiB, structured mode)</div></div>
+</div>
+<p class="note">This measures <strong>API retrieval only</strong>. It says nothing about BGP convergence, route propagation, update throughput or policy evaluation, so don't read it as "which daemon routes better".</p>
+
+<h2>What we measured</h2>
+<p>One GoBGP "source" daemon loads the RouteViews snapshot and announces it to each daemon under test. Once every target holds the same 1,115,966 routes, a small C++ client asks for the whole table and times the stream.</p>
+<div class="card diagram">
+<div class="table-wrap"><svg style="min-width:560px" viewBox="0 0 800 210" role="img" aria-label="Setup: an MRT snapshot is loaded into a GoBGP source daemon, which announces routes over BGP to three target daemons; a C++ gRPC client requests the full table from each target via ListPath.">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+    </marker>
+  </defs>
+  <g font-size="13" fill="var(--ink)">
+    <rect x="10" y="80" width="120" height="50" rx="8" fill="var(--code-bg)" stroke="var(--axis)"/>
+    <text x="70" y="101" text-anchor="middle" font-weight="600">MRT snapshot</text>
+    <text x="70" y="119" text-anchor="middle" fill="var(--ink-2)" font-size="11">RouteViews, 1.1M</text>
+
+    <rect x="170" y="80" width="130" height="50" rx="8" fill="var(--surface)" stroke="var(--axis)"/>
+    <text x="235" y="101" text-anchor="middle" font-weight="600">Source GoBGP</text>
+    <text x="235" y="119" text-anchor="middle" fill="var(--ink-2)" font-size="11">AS 65001</text>
+
+    <rect x="370" y="10" width="170" height="44" rx="8" fill="var(--surface)" stroke="var(--s1)" stroke-width="2"/>
+    <text x="455" y="37" text-anchor="middle" font-weight="600">GoBGP 4.9.0</text>
+    <rect x="370" y="83" width="170" height="44" rx="8" fill="var(--surface)" stroke="var(--s2)" stroke-width="2"/>
+    <text x="455" y="110" text-anchor="middle" font-weight="600">GoBGP 4.10.0</text>
+    <rect x="370" y="156" width="170" height="44" rx="8" fill="var(--surface)" stroke="var(--s3)" stroke-width="2"/>
+    <text x="455" y="183" text-anchor="middle" font-weight="600">RustyBGP (fixed)</text>
+
+    <rect x="620" y="80" width="170" height="50" rx="8" fill="var(--code-bg)" stroke="var(--axis)"/>
+    <text x="705" y="101" text-anchor="middle" font-weight="600">C++ gRPC client</text>
+    <text x="705" y="119" text-anchor="middle" fill="var(--ink-2)" font-size="11">ListPath, Adj-RIB-In</text>
+  </g>
+  <g stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#arr)">
+    <path d="M130,105 H166"/>
+    <path d="M300,98 C335,98 335,32 366,32"/>
+    <path d="M300,105 H366"/>
+    <path d="M300,112 C335,112 335,178 366,178"/>
+    <path d="M616,96 C580,96 580,32 544,32"/>
+    <path d="M616,105 H544"/>
+    <path d="M616,114 C580,114 580,178 544,178"/>
+  </g>
+  <g font-size="11" fill="var(--muted)">
+    <text x="148" y="98" text-anchor="middle">load</text>
+    <text x="318" y="72">BGP</text>
+    <text x="566" y="72">gRPC</text>
+  </g>
+</svg></div>
+<p class="note" style="margin-top:10px">Everything runs in Docker on one host. Requests are sequential and shuffled; each value is the median of 5 requests after 1 warm-up. Every daemon's answer is checked by SHA-256 over all routes, so all three return identical data.</p>
+</div>
+
+<h3>Three ways to ask for the table</h3>
+<div class="table-wrap">
+<table>
+  <tr><th>Mode</th><th>What the server sends</th></tr>
+  <tr><td><strong>Structured</strong></td><td>Every route attribute as a typed protobuf message. Easiest to use, most work to build.</td></tr>
+  <tr><td><strong>Structured + binary attrs</strong></td><td>Structured routes, plus the raw BGP attribute bytes alongside.</td></tr>
+  <tr><td><strong>Fully binary</strong></td><td>Only the raw wire-format NLRI and attribute bytes. Cheapest for the server; the client decodes.</td></tr>
+</table>
+</div>
+
+<h2>1 · Time to fetch the full table</h2>
+<p>Wall-clock time from request to the last route received. Shorter is better.</p>
+<div class="card">
+  <div class="legend" data-legend="versions"></div>
+  <div class="chart" id="c-total"></div>
+</div>
+
+<h2>2 · Time until the first routes arrive</h2>
+<p>GoBGP builds a large part of its answer before sending anything. RustyBGP starts streaming in under half a second.</p>
+<div class="card">
+  <div class="legend" data-legend="versions"></div>
+  <div class="chart" id="c-ttfb"></div>
+</div>
+
+<h2>3 · Server CPU spent per dump</h2>
+<p>User + system CPU the daemon burned while serving one full-table request. GoBGP's CPU time is higher than its wall-clock time because the work (including Go's garbage collector) runs on several cores at once.</p>
+<div class="card">
+  <div class="legend" data-legend="versions"></div>
+  <div class="chart" id="c-cpu"></div>
+</div>
+
+<h2>4 · Memory: loaded table vs peak during one dump</h2>
+<p>Each bar is a fresh daemon serving exactly one request. The pale part is memory used just holding the table; the full bar is the peak reached while serving the dump.</p>
+<div class="card">
+  <div class="legend" data-legend="versions"></div>
+  <div class="chart" id="c-mem"></div>
+  <p class="note" style="margin-top:12px">GoBGP 4.10 holds the table in ~0.3 GiB less memory than 4.9, but both climb to 2.2–3.3 GiB during a dump and stay there afterwards (Go doesn't hand the memory back promptly). RustyBGP peaks at ~2.5 GiB and drops back to ~1.4–1.6 GiB once idle. These are single observations, not medians.</p>
+</div>
+
+<h2>5 · The RustyBGP fix that made this possible</h2>
+<p>Unpatched RustyBGP converted the <em>entire</em> table to protobuf messages before sending the first one. The <code>fix/listpath-bounded-stream</code> change converts routes only as fast as the client reads them (a 1,024-message buffer), so memory stays flat and the stream starts at once.</p>
+<div class="two">
+  <div class="card">
+    <h3>Peak memory, one dump</h3>
+    <div class="legend" data-legend="fix"></div>
+    <div class="chart" id="c-fix-mem"></div>
+  </div>
+  <div class="card">
+    <h3>Time to fetch full table</h3>
+    <div class="legend" data-legend="fix"></div>
+    <div class="chart" id="c-fix-time"></div>
+  </div>
+</div>
+<p class="note">Before: commit <code>603d350</code>; after: <code>abab831</code>. Same compiler, Cargo.lock and build profile. Over a longer workload that ran all three modes back to back, lifetime peak fell from 12.2 GiB to 2.9 GiB.</p>
+
+<h2>What this means</h2>
+<ul class="take">
+  <li><strong>Ask for binary if you can.</strong> In every daemon, fully binary mode is the fastest and cheapest: about 15% less time and 20–30% less server CPU than structured mode.</li>
+  <li><strong>"Structured + binary attributes" is the worst of both.</strong> The server builds both representations, so it's the slowest mode everywhere.</li>
+  <li><strong>GoBGP 4.9 → 4.10 is roughly a wash for dumps.</strong> 4.10 is 1–6% slower in our medians, inside the run-to-run spread, and loads the table with less memory.</li>
+  <li><strong>RustyBGP with the bounded-stream fix</strong> is about 2× faster end to end, about 5× faster to first byte, and uses much less CPU, at a similar peak memory to GoBGP.</li>
+</ul>
+
+<h2>Caveats</h2>
+<ul class="take">
+  <li>One peer, one client, sequential requests on one machine. Slow consumers, concurrent dumps and multi-peer tables are separate experiments.</li>
+  <li>The client scans the binary bytes but does not fully decode BGP attributes, so real-world client cost will be higher in binary mode.</li>
+  <li>Server CPU is the process's total CPU around each request, not a profile of the handler.</li>
+</ul>
+
+<footer>
+  <p>Versions: GoBGP 4.9.0 (<code>a15f873</code>), GoBGP 4.10.0 (<code>e2cd8b1</code>), RustyBGP 0.2.0 + bounded-stream fix (<code>abab831</code>). Go 1.26.8, Rust 1.99.0, Ubuntu 24.04 runtime. Route-data SHA-256 <code>1cc9da83…</code>.</p>
+  <p>Full method, definitions and how to reproduce: <a href="https://github.com/FastNetMon/gobgp-full-table-benchmark/blob/main/METHODOLOGY.md">METHODOLOGY.md</a> · <a href="https://github.com/FastNetMon/gobgp-full-table-benchmark">source on GitHub</a> · <a href="data/summary.csv">timing CSV</a> · <a href="data/memory.csv">memory CSV</a></p>
+</footer>
+</main>
+<div id="tip" role="tooltip"></div>
+
+<script>
+// Medians from runs/workflow-validation-v2/report (16 Oct 2026).
+const MODES = ["Structured", "Structured + binary attrs", "Fully binary"];
+const VERSIONS = [
+  { key: "old",  label: "GoBGP 4.9.0",      color: "--s1" },
+  { key: "new",  label: "GoBGP 4.10.0",     color: "--s2" },
+  { key: "rust", label: "RustyBGP (fixed)", color: "--s3" },
+];
+// [structured, mixed, binary]; min/max from 5 measured requests
+const DATA = {
+  total: { old: [4255.0, 4997.2, 3623.5], new: [4519.9, 5049.5, 3792.8], rust: [1994.9, 2270.8, 1699.1],
+           min: { old: [4154.8, 4852.7, 3530.2], new: [4406.2, 4923.2, 3656.8], rust: [1955.9, 2182.7, 1687.3] },
+           max: { old: [5239.1, 5489.2, 4010.3], new: [5256.3, 5656.7, 4152.0], rust: [2166.3, 2443.1, 1731.5] } },
+  ttfb:  { old: [2406.7, 2882.0, 2222.9], new: [2613.6, 2982.8, 2368.4], rust: [468.4, 481.0, 454.0] },
+  cpu:   { old: [10.49, 13.00, 8.37], new: [12.21, 11.58, 8.78], rust: [2.15, 2.49, 1.53] },
+  loaded:{ old: [1.32, 1.26, 1.32], new: [1.02, 0.98, 1.02], rust: [1.48, 1.46, 1.45] },
+  peak:  { old: [2.83, 3.22, 2.23], new: [2.86, 3.28, 2.25], rust: [2.49, 2.48, 2.46] },
+  idle:  { old: [2.83, 3.22, 2.23], new: [2.86, 3.28, 2.25], rust: [1.43, 1.34, 1.60] },
+};
+// runs/2026-10-16/bounded-stream-fix
+const FIX_SERIES = [
+  { key: "before", label: "Before fix", color: "--before" },
+  { key: "after",  label: "After fix",  color: "--s3" },
+];
+const FIX = {
+  mem:  { before: [6.86, 7.09, 2.57], after: [2.46, 2.45, 2.44] },
+  time: { before: [3674.0, 3998.5, 2322.2], after: [2010.3, 2186.6, 1696.9] },
+};
+
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const tip = document.getElementById("tip");
+function showTip(e, html) {
+  tip.innerHTML = html; tip.style.opacity = 1;
+  const r = tip.getBoundingClientRect();
+  let x = e.clientX + 14, y = e.clientY + 14;
+  if (x + r.width > innerWidth - 8) x = e.clientX - r.width - 14;
+  if (y + r.height > innerHeight - 8) y = e.clientY - r.height - 14;
+  tip.style.left = x + "px"; tip.style.top = y + "px";
+}
+function hideTip() { tip.style.opacity = 0; }
+
+function legend(el, series) {
+  el.innerHTML = series.map(s => `<span><i style="background:var(${s.color})"></i>${s.label}</span>`).join("");
+}
+document.querySelectorAll('[data-legend="versions"]').forEach(el => legend(el, VERSIONS));
+document.querySelectorAll('[data-legend="fix"]').forEach(el => legend(el, FIX_SERIES));
+
+/* Grouped horizontal bars: one group per mode, one bar per series.
+   opts.under: optional {key:[...]} drawn as a pale inner segment (e.g. loaded RSS). */
+function groupedBars(id, series, values, opts) {
+  const el = document.getElementById(id);
+  const compact = opts.compact || el.clientWidth < 560;
+  const W = compact ? 380 : 780, labelW = compact ? 0 : 170, right = 70;
+  const barH = compact ? 16 : 18, gap = 2, groupGap = compact ? 30 : 18, top = 6;
+  const groupH = series.length * (barH + gap) - gap;
+  const head = compact ? 18 : 0;
+  const H = top + MODES.length * (head + groupH + groupGap) + 22;
+  const max = opts.max ?? Math.max(...series.flatMap(s => values[s.key]));
+  const plotW = W - labelW - right;
+  const x = v => labelW + (v / max) * plotW;
+  const ns = "http://www.w3.org/2000/svg";
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${opts.aria}">`;
+  // gridlines + ticks
+  const ticks = opts.ticks;
+  ticks.forEach(t => {
+    s += `<line x1="${x(t)}" x2="${x(t)}" y1="${top - 4}" y2="${H - 20}" stroke="${t === 0 ? css('--axis') : css('--grid')}" stroke-width="1"/>`;
+    s += `<text x="${x(t)}" y="${H - 4}" text-anchor="middle" font-size="11" fill="${css('--muted')}">${opts.tick(t)}</text>`;
+  });
+  let y = top;
+  MODES.forEach((m, mi) => {
+    if (compact) {
+      s += `<text x="0" y="${y + 12}" font-size="12" fill="${css('--ink-2')}">${m}</text>`;
+      y += head;
+    } else {
+      s += `<text x="0" y="${y + groupH / 2 + 4}" font-size="13" fill="${css('--ink-2')}">${m}</text>`;
+    }
+    series.forEach((ser, si) => {
+      const v = values[ser.key][mi];
+      const by = y + si * (barH + gap);
+      const w = Math.max(x(v) - labelW, 2), r = 4;
+      const col = css(ser.color);
+      // bar with rounded data-end, square at baseline
+      const path = `M${labelW},${by} H${labelW + w - r} Q${labelW + w},${by} ${labelW + w},${by + r} V${by + barH - r} Q${labelW + w},${by + barH} ${labelW + w - r},${by + barH} H${labelW} Z`;
+      s += `<g class="bar" data-mode="${mi}" data-s="${si}">`;
+      s += `<rect x="${labelW}" y="${by - 1}" width="${plotW + right}" height="${barH + gap}" fill="transparent"/>`;
+      s += `<path d="${path}" fill="${col}"/>`;
+      if (opts.under) {
+        const u = opts.under[ser.key][mi];
+        s += `<rect x="${labelW}" y="${by}" width="${Math.max(x(u) - labelW - 2, 0)}" height="${barH}" fill="${css('--surface')}" opacity="0.55"/>`;
+        s += `<line x1="${x(u)}" x2="${x(u)}" y1="${by}" y2="${by + barH}" stroke="${css('--surface')}" stroke-width="2"/>`;
+      }
+      s += `<text x="${labelW + w + 6}" y="${by + barH / 2 + 4}" font-size="12" fill="${css('--ink')}">${opts.fmt(v)}</text>`;
+      s += `</g>`;
+    });
+    y += groupH + groupGap;
+  });
+  s += `</svg>`;
+  el.innerHTML = s;
+  el.querySelectorAll(".bar").forEach(g => {
+    const mi = +g.dataset.mode, si = +g.dataset.s, ser = series[si];
+    g.addEventListener("mousemove", e => { g.classList.add("hot"); showTip(e, opts.tip(ser, mi)); });
+    g.addEventListener("mouseleave", () => { g.classList.remove("hot"); hideTip(); });
+  });
+  // accessible table view
+  if (!el.nextElementSibling || el.nextElementSibling.tagName !== "DETAILS") {
+    const rows = MODES.map((m, mi) => `<tr><td>${m}</td>${series.map(ser => `<td class="n">${opts.fmt(values[ser.key][mi])}</td>`).join("")}</tr>`).join("");
+    el.insertAdjacentHTML("afterend", `<details><summary>Show as table</summary><div class="table-wrap"><table><tr><th>Mode</th>${series.map(ser => `<th class="n">${ser.label}</th>`).join("")}</tr>${rows}</table></div></details>`);
+  }
+}
+
+const sec = v => (v / 1000).toFixed(2) + " s";
+function render() {
+  groupedBars("c-total", VERSIONS, DATA.total, {
+    aria: "Total time to fetch the full table by daemon and mode",
+    max: 5700, ticks: [0, 1000, 2000, 3000, 4000, 5000], tick: t => t / 1000 + " s", fmt: sec,
+    tip: (s, m) => `<b>${s.label}</b> · ${MODES[m]}<br>Median ${sec(DATA.total[s.key][m])}<br>Range ${sec(DATA.total.min[s.key][m])} – ${sec(DATA.total.max[s.key][m])}`,
+  });
+  groupedBars("c-ttfb", VERSIONS, DATA.ttfb, {
+    aria: "Time to first response by daemon and mode",
+    max: 3200, ticks: [0, 1000, 2000, 3000], tick: t => t / 1000 + " s", fmt: sec,
+    tip: (s, m) => `<b>${s.label}</b> · ${MODES[m]}<br>First response after ${sec(DATA.ttfb[s.key][m])}<br>Whole table after ${sec(DATA.total[s.key][m])}`,
+  });
+  groupedBars("c-cpu", VERSIONS, DATA.cpu, {
+    aria: "Server CPU seconds per full-table request",
+    max: 13.5, ticks: [0, 4, 8, 12], tick: t => t + " s", fmt: v => v.toFixed(1) + " s",
+    tip: (s, m) => `<b>${s.label}</b> · ${MODES[m]}<br>${DATA.cpu[s.key][m].toFixed(2)} CPU-seconds<br>vs ${sec(DATA.total[s.key][m])} wall-clock`,
+  });
+  groupedBars("c-mem", VERSIONS, DATA.peak, {
+    aria: "Loaded and peak RSS memory per daemon and mode",
+    max: 3.5, ticks: [0, 1, 2, 3], tick: t => t + " GiB", fmt: v => v.toFixed(2) + " GiB", under: DATA.loaded,
+    tip: (s, m) => `<b>${s.label}</b> · ${MODES[m]}<br>Table loaded: ${DATA.loaded[s.key][m].toFixed(2)} GiB<br>Peak during dump: ${DATA.peak[s.key][m].toFixed(2)} GiB<br>15 s later: ${DATA.idle[s.key][m].toFixed(2)} GiB`,
+  });
+  groupedBars("c-fix-mem", FIX_SERIES, FIX.mem, {
+    aria: "RustyBGP peak memory before and after the bounded-stream fix", compact: true,
+    max: 7.5, ticks: [0, 2, 4, 6], tick: t => t + " GiB", fmt: v => v.toFixed(1) + " GiB",
+    tip: (s, m) => `<b>${s.label}</b> · ${MODES[m]}<br>Peak RSS ${FIX.mem[s.key][m].toFixed(2)} GiB`,
+  });
+  groupedBars("c-fix-time", FIX_SERIES, FIX.time, {
+    aria: "RustyBGP total time before and after the bounded-stream fix", compact: true,
+    max: 4300, ticks: [0, 2000, 4000], tick: t => t / 1000 + " s", fmt: v => (v / 1000).toFixed(1) + " s",
+    tip: (s, m) => `<b>${s.label}</b> · ${MODES[m]}<br>Median ${sec(FIX.time[s.key][m])}`,
+  });
+}
+render();
+let narrow = innerWidth < 600;
+addEventListener("resize", () => { if ((innerWidth < 600) !== narrow) { narrow = !narrow; render(); } });
+// re-render on theme change so SVG picks up the new token values
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+new MutationObserver(render).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+</script>
+</body>
+</html>
